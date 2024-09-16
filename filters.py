@@ -48,7 +48,7 @@ def canny_edge_detection(gray_frame):
     """
     
     # Apply Gaussian blur to reduce noise and smoothen edges 
-    blurred = blur_frame(gray_frame=gray_frame)
+    blurred = blur_frame(gray_frame)
     
     # Perform Canny edge detection 
     edges = cv2.Canny(blurred, 60, 145) 
