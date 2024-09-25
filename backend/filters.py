@@ -51,6 +51,6 @@ def canny_edge_detection(gray_frame):
     blurred = blur_frame(gray_frame)
     
     # Perform Canny edge detection 
-    edges = cv2.Canny(blurred, 60, 145) 
+    edges = cv2.Canny(blurred, 60, 135) 
     
     return edges
