@@ -8,7 +8,7 @@ import time
 # Initialize the Flask app
 app = Flask(__name__)
 
-video_path = 'HCI_Project_Test_Video.mp4'
+video_path = 'HCI_Video_Test_2.mp4'
 
 # Initialize the camera
 cap = cv2.VideoCapture(video_path)
@@ -32,6 +32,7 @@ def text_with_background(image, text, scale, thickness, text_x, text_y, text_col
 
 # Store human counts over time
 human_count_history = []
+bad_emotions = 0
 
 def detect_surge(surge_threshold):
     global human_count_history
@@ -51,10 +52,15 @@ def detect_surge(surge_threshold):
     return abs(last_count - first_count) >= surge_threshold
 
 def frame_generation():
+    frame_counter = 0  # Counter to keep track of frames
+
     while True:
         success, frame = cap.read()  # Read a frame from the camera
         if not success:
             break
+
+        # Increment frame counter
+        frame_counter += 1
 
         # Remove black bars from the frame if they exist
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -65,6 +71,11 @@ def frame_generation():
 
         # Draw bounding boxes for detected people
         num_heads = 0
+        security_rating = 0
+        # Reset bad emotion counter every 5 frames
+        if frame_counter % 5 == 0:
+            human_bad_emotions = 0
+        
         for result in results:
             for box in result.boxes:
                 # Check to see if the object detected is a person
@@ -72,42 +83,39 @@ def frame_generation():
                     num_heads += 1
                     # Convert bounding box coordinates from tensor to integers
                     x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                    
+
                     # Grab image of human
                     human_location = frame[y1:y2, x1:x2]
-                    
                     human_location = cv2.resize(human_location, (0, 0), fx=0.5, fy=0.5)
-                    
-                    # Run emotion analysis
-                    emotion_analysis = DeepFace.analyze(human_location, actions=['emotion'], enforce_detection=False)
-                    
-                    # Grab dominant emotion
-                    dominant_emotion = emotion_analysis[0]['dominant_emotion']
-                    
-                    # # List of "good" emotions
-                    emotions = ["happy", "sad", "surprise", "neutral"]
-                    # all emotions that can be detected:
-                    # ["angry", "disgust", "fear", "happy", "sad", "surprise", "neutral"]
-                    
-                    box_color = (0, 255, 0)
-                    
-                    if dominant_emotion in emotions:
-                        box_color = (0, 255, 0)
-                    else:
-                        box_color = (0, 0, 255)
-                    
-                    # Draw colored box around detected human based on dominant emotion
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)  
 
+                    # Run emotion analysis only every 5 frames
+                    if frame_counter % 5 == 0:
+                        emotion_analysis = DeepFace.analyze(human_location, actions=['emotion'], enforce_detection=False)
+                        dominant_emotion = emotion_analysis[0]['dominant_emotion']
+
+                        # List of "good" emotions
+                        emotions = ["happy", "sad", "surprise", "neutral"]
+                        box_color = (0, 255, 0) if dominant_emotion in emotions else (0, 0, 255)
+                        human_bad_emotions = (human_bad_emotions + 1) if dominant_emotion not in emotions else human_bad_emotions
+                    else:
+                        box_color = (0, 255, 255)  # Default color for skipped frames
+
+                    # Draw colored box around detected human
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
+
+        # Calculate the security rating of the frame
+        security_rating = round((num_heads - bad_emotions) * 100, 2) / num_heads if num_heads > 0 else 100.0
+        
         # Record the current count and timestamp
         human_count_history.append((time.time(), num_heads))
 
         # Check for a surge
-        if detect_surge(1):
+        if detect_surge(8):
             print("Surge detected!")
-        
+
         # Add text to the image with a background
         text_with_background(frame, f'Humans: {num_heads}', 1, 2, 10, 30, (0, 255, 0), (0, 0, 0))
+        text_with_background(frame, f'Security Rating: {security_rating}%', 1, 2, 10, 70, (255, 255, 255), (0, 0, 0))
 
         # Encode the frame to JPG format
         ret, frame_encode = cv2.imencode('.jpg', frame)
@@ -116,6 +124,7 @@ def frame_generation():
         # Yield the frame as part of the stream
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+
 
 
 @app.route('/video_feed')
