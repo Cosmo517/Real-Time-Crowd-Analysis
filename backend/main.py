@@ -53,7 +53,8 @@ def detect_surge(surge_threshold):
 
 def frame_generation():
     frame_counter = 0  # Counter to keep track of frames
-
+    human_bad_emotions = 0
+    
     while True:
         success, frame = cap.read()  # Read a frame from the camera
         if not success:
@@ -69,33 +70,40 @@ def frame_generation():
         # Perform YOLOv8 detection
         results = model.predict(cropped_frame)
 
-        # Draw bounding boxes for detected people
+        # Keep track of the number of humans and security rating
         num_heads = 0
         security_rating = 0
+        
         # Reset bad emotion counter every 5 frames
         if frame_counter % 5 == 0:
             human_bad_emotions = 0
-        
+            
+        # Draw bounding boxes for detected people
         for result in results:
             for box in result.boxes:
                 # Check to see if the object detected is a person
-                if int(box.cls) == 0:  # Ensure cls is an integer
+                if int(box.cls) == 0:
                     num_heads += 1
                     # Convert bounding box coordinates from tensor to integers
                     x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
 
-                    # Grab image of human
-                    human_location = frame[y1:y2, x1:x2]
-                    human_location = cv2.resize(human_location, (0, 0), fx=0.5, fy=0.5)
-
                     # Run emotion analysis only every 5 frames
                     if frame_counter % 5 == 0:
-                        emotion_analysis = DeepFace.analyze(human_location, actions=['emotion'], enforce_detection=False)
+                        # Grab image of human and resize for faster emotion detection
+                        human_location = frame[y1:y2, x1:x2]
+                        human_location = cv2.resize(human_location, (0, 0), fx=0.5, fy=0.5)
+                        
+                        # Perform emotion analysis 
+                        emotion_analysis = DeepFace.analyze(human_location, actions=['emotion'], enforce_detection=False, silent=False)
                         dominant_emotion = emotion_analysis[0]['dominant_emotion']
 
                         # List of "good" emotions
                         emotions = ["happy", "sad", "surprise", "neutral"]
+                        
+                        # Set box color depending on emotion
                         box_color = (0, 255, 0) if dominant_emotion in emotions else (0, 0, 255)
+                        
+                        # Update the # of bad emotions detected if needed
                         human_bad_emotions = (human_bad_emotions + 1) if dominant_emotion not in emotions else human_bad_emotions
                     else:
                         box_color = (0, 255, 255)  # Default color for skipped frames
@@ -104,12 +112,12 @@ def frame_generation():
                     cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
 
         # Calculate the security rating of the frame
-        security_rating = round((num_heads - bad_emotions) * 100, 2) / num_heads if num_heads > 0 else 100.0
+        security_rating = round((num_heads - human_bad_emotions) * 100 / num_heads, 2) if num_heads > 0 else 100.0
         
         # Record the current count and timestamp
         human_count_history.append((time.time(), num_heads))
 
-        # Check for a surge
+        # Check for a surge (rate of change of 8 within 5 seconds)
         if detect_surge(8):
             print("Surge detected!")
 
